@@ -110,6 +110,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     checkinstall \
     cmake \
+    libkrb5-dev \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
 FROM builder as ccache
@@ -117,6 +118,9 @@ FROM builder as ccache
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
     ccache \
+    curl \
+    ca-certificates \
+    gnupg2 \
     && rm -rf /var/lib/apt/lists/*
 ENV CCACHE_DIR=/ccache
 ENV PATH=/usr/lib/ccache:$PATH
@@ -373,11 +377,22 @@ RUN tar -xvf /tmp/timescaledb.tar.gz -C /tmp && \
     rm -rf /tmp/timescaledb.tar.gz
 # Build from source
 WORKDIR /tmp/timescaledb-${timescaledb_release}/build
-RUN cmake -DAPACHE_ONLY=1 ..
+RUN cmake -DAPACHE_ONLY=0 ..
 RUN --mount=type=cache,target=/ccache,from=public.ecr.aws/supabase/postgres:ccache \
     make -j$(nproc)
 # Create debian package
 RUN checkinstall -D --install=no --fstrans=no --backup=no --pakdir=/tmp --pkgname=timescaledb --pkgversion=${timescaledb_release} --nodoc
+
+
+####################
+# 10.5-timescaledb-toolkit.yml
+####################
+FROM ccache as timescaledb-toolkit
+RUN curl -s https://packagecloud.io/install/repositories/timescale/timescaledb/script.deb.sh | bash
+RUN apt-get update && apt-get install -y --no-install-recommends --download-only \
+    timescaledb-toolkit-postgresql-${postgresql_major} \
+    && rm -rf /var/lib/apt/lists/*
+RUN mv /var/cache/apt/archives/*.deb /tmp/
 
 ####################
 # 11-wal2json.yml
@@ -832,6 +847,7 @@ COPY --from=pgsql-http-source /tmp/*.deb /tmp/
 COPY --from=plpgsql_check-source /tmp/*.deb /tmp/
 COPY --from=pg-safeupdate-source /tmp/*.deb /tmp/
 COPY --from=timescaledb-source /tmp/*.deb /tmp/
+COPY --from=timescaledb-toolkit /tmp/*.deb /tmp/
 COPY --from=wal2json-source /tmp/*.deb /tmp/
 # COPY --from=pljava /tmp/*.deb /tmp/
 COPY --from=plv8 /tmp/*.deb /tmp/
